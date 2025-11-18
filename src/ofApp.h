@@ -3,6 +3,21 @@
 #include "ofMain.h"
 #include <vector>
 
+// Define type of debris
+enum DebrisType {
+	ROCK,
+	LOG,
+	TOWEL
+};
+
+//Struct to hold debris info
+struct DebrisObject {
+	ofVec2f pos;
+	DebrisType type;
+	ofColor color;
+	float radius; //collision radius for distribution
+};
+
 class ofApp : public ofBaseApp{
 
 	public:
@@ -10,33 +25,24 @@ class ofApp : public ofBaseApp{
 		void update();
 		void draw();
 
-		/*
-		ofMesh terrainMesh;
-		int terrainWidth = 500;
-		int terrainHeight = 500;
-		int terrainGridStep = 10;
-		*/
-
 		//Terrain
 		ofMesh terrain;
-		ofVec2f flow_dir = ofVec2f(0, 1); // Inland flow (from shore at y=0)
+		ofVec2f flow_dir = ofVec2f(0, 1); // Inland flow (from shore at y=1)
 		float terrain_size = 800.0f;
 		float shoreline_y = terrain_size * 0.9f; // Shore near higher y
 		float getTerrainHeight(float x, float y);
 
-		/*
-		//noise
-		float noiseFrequency = 0.01;
-		float time = 0.0;
-		float timeSpeed = 0.02;
-		*/
-
 		//camera
 		ofEasyCam easyCam;
 
-		//objects
+		//DISTRIBUTION LOGIC
+		
+		//list of debris
+		vector<DebrisObject> debrisList;
 
-		//point placement
-		vector<ofVec2f> points;
-		vector<ofVec2f> generatePointSamples(float width, float height, float r, float k = 30);
+		//check for point collision
+		bool isValidPlacement(ofVec2f p, float r);
+
+		//placement function
+		void generateDebrisField();
 };

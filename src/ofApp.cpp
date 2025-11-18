@@ -2,46 +2,6 @@
 
 //--------------------------------------------------------------
 void ofApp::setup(){
-	//OLD METHOD FOR DRAWING SHORE
-	/* terrainMesh.setMode(OF_PRIMITIVE_TRIANGLES);
-
-	//generate vertices
-	for (int y = 0; y < terrainHeight; y++) {
-		for (int x = 0; x < terrainWidth; x++) {
-			float noiseVal = ofNoise(x * noiseFrequency, y * noiseFrequency);
-
-			//noise for height
-			float z = ofMap(noiseVal, 0, 1, -30, 30);
-			terrainMesh.addVertex(glm::vec3(x - terrainWidth / 2, y - terrainHeight / 2, z));
-
-			//noise for color
-			ofColor b = ofColor::blue;
-			ofColor w = ofColor::white;
-			terrainMesh.addColor(b.lerp(w, noiseVal));
-		}
-	}
-
-	//generate indices to connect vertices
-	int gridW = terrainWidth / terrainGridStep;
-	int gridH = terrainHeight / terrainGridStep;
-	for (int y = 0; y < gridW - 1; y++) {
-		for (int x = 0; x < gridH - 1; x++) {
-			int i1 = (y * gridW) + x; // Top-left
-			int i2 = (y * gridW) + (x + 1); // Top-right
-			int i3 = ((y + 1) * gridW) + x; // Bottom-left
-			int i4 = ((y + 1) * gridW) + (x + 1); // Bottom-right
-
-			// Triangle 1 (Top-left, Top-right, Bottom-left)
-			terrainMesh.addIndex(i1);
-			terrainMesh.addIndex(i2);
-			terrainMesh.addIndex(i3);
-
-			// Triangle 2 (Top-right, Bottom-right, Bottom-left)
-			terrainMesh.addIndex(i2);
-			terrainMesh.addIndex(i4);
-			terrainMesh.addIndex(i3);
-		}
-	}*/
 
 	ofSetBackgroundColor(ofColor::black);
 	easyCam.setDistance(1000);
@@ -58,16 +18,12 @@ void ofApp::setup(){
 
 			// Color: bluer near shore, sandier inland
 			float shore_t = (y - shoreline_y) / terrain_size;
-			if (shore_t > 0) {
-				terrain.addColor(ofColor::navy);
-			} else {
-				terrain.addColor(ofColor::sandyBrown);
-			}
-			/* ofColor b = ofColor::blue;
-			ofColor w = ofColor::brown;
-			terrain.addColor(w.lerp(b, shore_t));*/
+			if (shore_t > 0) terrain.addColor(ofColor::navy);
+			else terrain.addColor(ofColor::sandyBrown);
 		}
 	}
+
+	//indices setup
 	for (int iy = 0; iy < res; ++iy) {
 		for (int ix = 0; ix < res; ++ix) {
 			int i = iy * (res + 1) + ix;
@@ -77,7 +33,7 @@ void ofApp::setup(){
 	}
 
 	//generated points
-	points = generatePointSamples(terrain_size, shoreline_y-20, 10.0);
+	generateDebrisField();
 }
 
 //--------------------------------------------------------------
@@ -89,10 +45,17 @@ void ofApp::update(){
 void ofApp::draw(){
 	easyCam.begin();
 	terrain.draw();
-	ofSetColor(ofColor::red);
-	for (int i = 0; i < points.size(); i++) {
-		ofDrawCircle(points[i].x, points[i].y, 1);
+
+	//draw different categories of debris
+	for (auto& d : debrisList) {
+		ofSetColor(d.color);
+		float z = getTerrainHeight(d.pos.x, d.pos.y) + 5;
+
+		if (d.type == ROCK) ofDrawSphere(d.pos.x, d.pos.y, z, d.radius * 0.5);
+		else if (d.type == LOG) ofDrawBox(d.pos.x, d.pos.y, z, d.radius, d.radius/4, d.radius/4);
+		else ofDrawCircle(d.pos.x, d.pos.y, d.radius);
 	}
+
 	easyCam.end();
 }
 
@@ -103,71 +66,105 @@ float ofApp::getTerrainHeight(float x, float y) {
 	return slope + noise1 + noise2;
 }
 
-vector<ofVec2f> ofApp::generatePointSamples(float width, float height, float r, float k) {
-	vector<ofVec2f> samples;
-	vector<int> active_list;
-	float cell_size = r / sqrt(2.0f);
-	int grid_cols = ceil(width / cell_size);
-	int grid_rows = ceil(height / cell_size);
-	vector<vector<int>> grid(grid_rows, vector<int>(grid_cols, -1));
+bool ofApp::isValidPlacement(ofVec2f p, float r) {
+	//bounds check
+	if (p.x < 0 || p.x > terrain_size || p.y < 0 || p.y > terrain_size*0.85) return false;
 
-	ofVec2f initial(ofRandom(width), ofRandom(height));
-	samples.push_back(initial);
-	int row = floor(initial.y / cell_size);
-	int col = floor(initial.x / cell_size);
-	grid[row][col] = 0;
-	active_list.push_back(0);
+	//check against other debris (brute force since there aren't going to be an enormous amount of objects)
+	for (auto& d : debrisList) {
+		float dist = p.distance(d.pos);
+		//min dist is sum of radii
+		if (dist < (r + d.radius)) return false;
+	}
+	return true;
+}
 
-	// Step 2: Process active list
-	while (!active_list.empty()) {
-		size_t rand_idx = size_t(ofRandom(active_list.size()));
-		int i = active_list[rand_idx];
-		ofVec2f xi = samples[i];
-		bool found = false;
+void ofApp::generateDebrisField() {
+	debrisList.clear();
 
-		for (int attempt = 0; attempt < k; ++attempt) {
-			// Generate candidate in annulus r to 2r
-			float theta = ofRandom(TWO_PI);
-			float dist = ofRandom(r, 2 * r);
-			ofVec2f candidate = xi + ofVec2f(dist * cos(theta), dist * sin(theta));
+	//phase 1: rock placement
+	//rocks are heavy so they stay even in the high flow areas
+	int targetRocks = 50;
+	//try 1000 times
+	for (int i = 0; i < 1000; i++) {
+		if (debrisList.size() >= targetRocks) break;
 
-			// Check bounds
-			if (candidate.x < 0 || candidate.x >= width || candidate.y < 0 || candidate.y >= height) continue;
+		ofVec2f pos(ofRandom(terrain_size), ofRandom(terrain_size));
+		float r = ofRandom(15.0f, 40.0f); //large rock radius
 
-			// Check nearby samples
-			int crow = floor(candidate.y / cell_size);
-			int ccol = floor(candidate.x / cell_size);
-			bool valid = true;
-			int search_radius = 2; // Sufficient for cell_size = r/sqrt(2)
-			for (int dy = -search_radius; dy <= search_radius && valid; ++dy) {
-				for (int dx = -search_radius; dx <= search_radius && valid; ++dx) {
-					int nrow = crow + dy;
-					int ncol = ccol + dx;
-					if (nrow >= 0 && nrow < grid_rows && ncol >= 0 && ncol < grid_cols) {
-						int sidx = grid[nrow][ncol];
-						if (sidx != -1 && samples[sidx].distance(candidate) < r) {
-							valid = false;
-						}
-					}
-				}
-			}
-
-			if (valid) {
-				int newidx = samples.size();
-				samples.push_back(candidate);
-				grid[crow][ccol] = newidx;
-				active_list.push_back(newidx);
-				found = true;
-				break;
-			}
-		}
-
-		if (!found) {
-			// Remove from active list (swap and pop)
-			active_list[rand_idx] = active_list.back();
-			active_list.pop_back();
+		if (isValidPlacement(pos, r)) {
+			DebrisObject rock;
+			rock.pos = pos;
+			rock.type = ROCK;
+			rock.radius = r;
+			rock.color = ofColor::grey;
+			debrisList.push_back(rock);
 		}
 	}
 
-	return samples;
+	//phase 2: log placement
+	//tusnami flow is strongest in the middle so light/medium objects are pushed to the side
+	int targetLogs = 100;
+	float centerLine = terrain_size / 2.0;
+	float flowChannelWidth = 400.0f;
+
+	for (int i = 0; i < 5000; i++) {
+		if (debrisList.size() > targetLogs + targetRocks) break;
+
+		ofVec2f pos(ofRandom(terrain_size), ofRandom(terrain_size));
+		float r = 8.0f; //medium radius
+
+		//distance from center flow
+		float distFromCenter = abs(pos.x - centerLine);
+
+		//probability of existing at current spot
+		float prob = ofMap(distFromCenter, 0, flowChannelWidth, 0.0, 1.0, true);
+
+		//add noise for randomness
+		prob += ofRandom(-0.1, 0.1);
+
+		if (ofRandom(1.0) < prob) {
+			if (isValidPlacement(pos, r)) {
+				DebrisObject log;
+				log.pos = pos;
+				log.type = LOG;
+				log.radius = r;
+				log.color = ofColor::brown;
+				debrisList.push_back(log);
+			}
+		}
+	}
+
+	//phase 3: beach towel/human light object placement
+	//light objects like towels don't get thrown randomly, they get snagged around heavy objects
+	vector<int> rockIndices;
+	for (int i = 0; i < debrisList.size(); i++) {
+		if (debrisList[i].type == ROCK) rockIndices.push_back(i);
+	}
+
+	for (int i : rockIndices) {
+		int numTowels = ofRandom(2, 5); //randomly between 2-5 towels per rock
+
+		for (int t = 0; t < numTowels; t++) {
+			ofVec2f rockPos = debrisList[i].pos;
+
+			//pick spot close to rock
+			float angle = ofRandom(TWO_PI);
+			float dist = ofRandom(15.0, 30.0);
+			ofVec2f offset(cos(angle) * dist, sin(angle) * dist);
+			ofVec2f pos = rockPos + offset;
+
+			float r = 3.0f;
+
+			//verify to check for overlap and add towel
+			if (isValidPlacement(pos, r)) {
+				DebrisObject towel;
+				towel.pos = pos;
+				towel.type = TOWEL;
+				towel.radius = r;
+				towel.color = ofColor::white;
+				debrisList.push_back(towel);
+			}
+		}
+	}
 }
