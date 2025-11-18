@@ -44,17 +44,26 @@ void ofApp::update(){
 //--------------------------------------------------------------
 void ofApp::draw(){
 	easyCam.begin();
+
+	ofPushMatrix();
+	ofTranslate(-terrain_size / 2, -terrain_size / 2);
 	terrain.draw();
 
 	//draw different categories of debris
 	for (auto& d : debrisList) {
 		ofSetColor(d.color);
 		float z = getTerrainHeight(d.pos.x, d.pos.y) + 5;
+		ofPushMatrix();
+		ofTranslate(d.pos.x, d.pos.y, z);
+		ofRotateZDeg(d.angle);
 
-		if (d.type == ROCK) ofDrawSphere(d.pos.x, d.pos.y, z, d.radius * 0.5);
-		else if (d.type == LOG) ofDrawBox(d.pos.x, d.pos.y, z, d.radius, d.radius/4, d.radius/4);
-		else ofDrawCircle(d.pos.x, d.pos.y, d.radius);
+		if (d.type == ROCK) ofDrawSphere(0, 0, 0, d.radius * 0.5);
+		else if (d.type == LOG) ofDrawBox(0, 0, 0, d.radius/4, d.radius*4, d.radius/4);
+		else ofDrawCircle(0, 0, 0, d.radius);
+		ofPopMatrix();
 	}
+
+	ofPopMatrix();
 
 	easyCam.end();
 }
@@ -68,13 +77,15 @@ float ofApp::getTerrainHeight(float x, float y) {
 
 bool ofApp::isValidPlacement(ofVec2f p, float r) {
 	//bounds check
-	if (p.x < 0 || p.x > terrain_size || p.y < 0 || p.y > terrain_size*0.85) return false;
+	if (p.x < 15.0 || p.x > terrain_size-15.0 || p.y < 15.0 || p.y > terrain_size*0.85) return false;
 
 	//check against other debris (brute force since there aren't going to be an enormous amount of objects)
 	for (auto& d : debrisList) {
 		float dist = p.distance(d.pos);
 		//min dist is sum of radii
-		if (dist < (r + d.radius)) return false;
+		float reductionFactor = 0.0f;
+		if (r <= 3.0f) reductionFactor = 10.0f;
+		if (dist < (r + d.radius - reductionFactor)) return false;
 	}
 	return true;
 }
@@ -98,6 +109,7 @@ void ofApp::generateDebrisField() {
 			rock.type = ROCK;
 			rock.radius = r;
 			rock.color = ofColor::grey;
+			rock.angle = ofRandom(360);
 			debrisList.push_back(rock);
 		}
 	}
@@ -108,28 +120,32 @@ void ofApp::generateDebrisField() {
 	float centerLine = terrain_size / 2.0;
 	float flowChannelWidth = 400.0f;
 
-	for (int i = 0; i < 5000; i++) {
+	for (int i = 0; i < 10000; i++) {
 		if (debrisList.size() > targetLogs + targetRocks) break;
 
 		ofVec2f pos(ofRandom(terrain_size), ofRandom(terrain_size));
-		float r = 8.0f; //medium radius
+		float r = ofRandom(8.0f, 20.0f); //medium radius
 
-		//distance from center flow
+		//distance from center flow and probability of placement
 		float distFromCenter = abs(pos.x - centerLine);
+		float channelProb = ofMap(distFromCenter, 0, flowChannelWidth, 0.0, 1.0, true);
 
-		//probability of existing at current spot
-		float prob = ofMap(distFromCenter, 0, flowChannelWidth, 0.0, 1.0, true);
+		//distance from shore and density near shoreline
+		float distFromShore = abs(pos.y - shoreline_y);
+		float shoreProb = ofMap(distFromShore, 0, terrain_size*0.8, 1.0, 0.0, true);
 
-		//add noise for randomness
-		prob += ofRandom(-0.1, 0.1);
+		//final probability for log placement
+		float finalProb = channelProb * shoreProb;
 
-		if (ofRandom(1.0) < prob) {
+		if (ofRandom(1.0) < finalProb) {
 			if (isValidPlacement(pos, r)) {
 				DebrisObject log;
 				log.pos = pos;
 				log.type = LOG;
 				log.radius = r;
 				log.color = ofColor::brown;
+				//add anisotropy to log angle
+				log.angle = ofRandom(-20, 20);
 				debrisList.push_back(log);
 			}
 		}
@@ -150,7 +166,7 @@ void ofApp::generateDebrisField() {
 
 			//pick spot close to rock
 			float angle = ofRandom(TWO_PI);
-			float dist = ofRandom(15.0, 30.0);
+			float dist = ofRandom(10.0, 15.0);
 			ofVec2f offset(cos(angle) * dist, sin(angle) * dist);
 			ofVec2f pos = rockPos + offset;
 
@@ -163,8 +179,14 @@ void ofApp::generateDebrisField() {
 				towel.type = TOWEL;
 				towel.radius = r;
 				towel.color = ofColor::white;
+				towel.angle = ofRandom(360);
 				debrisList.push_back(towel);
 			}
 		}
 	}
+}
+
+void ofApp::keyPressed(int key) {
+	generateDebrisField();
+	draw();
 }

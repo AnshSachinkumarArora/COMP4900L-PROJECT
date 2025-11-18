@@ -16,6 +16,7 @@ struct DebrisObject {
 	DebrisType type;
 	ofColor color;
 	float radius; //collision radius for distribution
+	float angle; //angle for log anisotropy
 };
 
 class ofApp : public ofBaseApp{
@@ -24,6 +25,7 @@ class ofApp : public ofBaseApp{
 		void setup();
 		void update();
 		void draw();
+		void keyPressed(int key);
 
 		//Terrain
 		ofMesh terrain;
