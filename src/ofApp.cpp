@@ -18,8 +18,8 @@ void ofApp::setup(){
 
 			// Color: bluer near shore, sandier inland
 			float shore_t = (y - shoreline_y) / terrain_size;
-			if (shore_t > 0) terrain.addColor(ofColor::navy);
-			else terrain.addColor(ofColor::sandyBrown);
+			if (shore_t > 0) terrain.addColor(ofColor::fromHex(0xc0c6c9));
+			else terrain.addColor(ofColor::fromHex(0x5c5c5c));
 		}
 	}
 
@@ -52,14 +52,10 @@ void ofApp::draw(){
 	//draw different categories of debris
 	for (auto& d : debrisList) {
 		ofSetColor(d.color);
-		float z = getTerrainHeight(d.pos.x, d.pos.y) + 5;
 		ofPushMatrix();
-		ofTranslate(d.pos.x, d.pos.y, z);
+		ofTranslate(d.pos);
 		ofRotateZDeg(d.angle);
-
-		if (d.type == ROCK) ofDrawSphere(0, 0, 0, d.radius * 0.5);
-		else if (d.type == LOG) ofDrawBox(0, 0, 0, d.radius/4, d.radius*4, d.radius/4);
-		else ofDrawCircle(0, 0, 0, d.radius);
+		ofDrawBox(0, 0, 0, d.size.x, d.size.y, d.size.z);
 		ofPopMatrix();
 	}
 
@@ -69,7 +65,7 @@ void ofApp::draw(){
 }
 
 float ofApp::getTerrainHeight(float x, float y) {
-	float slope = (y - shoreline_y) / terrain_size * 20.0f; // Gentle rise inland
+	float slope = (y - shoreline_y) / terrain_size * 30.0f; // Gentle rise inland
 	float noise1 = ofNoise(x * 0.005f, y * 0.005f) * 10.0f; // Large waves
 	float noise2 = ofNoise(x * 0.02f, y * 0.02f) * 5.0f; // Small details
 	return slope + noise1 + noise2;
@@ -77,7 +73,7 @@ float ofApp::getTerrainHeight(float x, float y) {
 
 bool ofApp::isValidPlacement(ofVec2f p, float r) {
 	//bounds check
-	if (p.x < 15.0 || p.x > terrain_size-15.0 || p.y < 15.0 || p.y > terrain_size*0.85) return false;
+	if (p.x < 5.0 || p.x > terrain_size-15.0 || p.y < 5.0 || p.y > terrain_size*0.95) return false;
 
 	//check against other debris (brute force since there aren't going to be an enormous amount of objects)
 	for (auto& d : debrisList) {
@@ -93,95 +89,71 @@ bool ofApp::isValidPlacement(ofVec2f p, float r) {
 void ofApp::generateDebrisField() {
 	debrisList.clear();
 
-	//phase 1: rock placement
-	//rocks are heavy so they stay even in the high flow areas
-	int targetRocks = 50;
-	//try 1000 times
-	for (int i = 0; i < 1000; i++) {
-		if (debrisList.size() >= targetRocks) break;
+	//setting cluster centers
+	vector<ofVec3f> clusterCenters;
 
-		ofVec2f pos(ofRandom(terrain_size), ofRandom(terrain_size));
-		float r = ofRandom(15.0f, 40.0f); //large rock radius
+	int numCenters = 300;
 
-		if (isValidPlacement(pos, r)) {
-			DebrisObject rock;
-			rock.pos = pos;
-			rock.type = ROCK;
-			rock.radius = r;
-			rock.color = ofColor::grey;
-			rock.angle = ofRandom(360);
-			debrisList.push_back(rock);
+	int attempts = 0;
+	while (clusterCenters.size() < numCenters && attempts < 10000) {
+		attempts++;
+		float x = ofRandom(terrain_size);
+		float y = ofRandom(terrain_size);
+
+		//shoreline gradient
+		float distFromShore = abs(y - shoreline_y);
+		float prob = ofMap(distFromShore, 0, terrain_size * 0.9, 1.0, 0.2, true);
+
+		if (ofRandom(1.0) < prob) {
+			float z = getTerrainHeight(x, y);
+			clusterCenters.push_back(ofVec3f(x, y, z));
 		}
 	}
 
-	//phase 2: log placement
-	//tusnami flow is strongest in the middle so light/medium objects are pushed to the side
-	int targetLogs = 100;
-	float centerLine = terrain_size / 2.0;
-	float flowChannelWidth = 400.0f;
+	//fill clusters (apply power law to pile size)
+	for (const auto& center : clusterCenters) {
+		//power law magnitude to determine size of pile
+		float k = 4.0;
+		float intensity = pow(ofRandom(0, 1), k);
 
-	for (int i = 0; i < 10000; i++) {
-		if (debrisList.size() > targetLogs + targetRocks) break;
+		//use intensity for radius and count
+		//pile sizes
+		float radius = ofLerp(20.0, 100.0, intensity);
+		int numTrash = ofLerp(10, 400, intensity);
 
-		ofVec2f pos(ofRandom(terrain_size), ofRandom(terrain_size));
-		float r = ofRandom(8.0f, 20.0f); //medium radius
+		for (int i = 0; i < numTrash; i++) {
 
-		//distance from center flow and probability of placement
-		float distFromCenter = abs(pos.x - centerLine);
-		float channelProb = ofMap(distFromCenter, 0, flowChannelWidth, 0.0, 1.0, true);
+			// Matérn Placement: Uniformly fill the circle
+			float r = sqrt(ofRandom(1.0)) * radius;
+			float theta = ofRandom(TWO_PI);
 
-		//distance from shore and density near shoreline
-		float distFromShore = abs(pos.y - shoreline_y);
-		float shoreProb = ofMap(distFromShore, 0, terrain_size*0.8, 1.0, 0.0, true);
+			float tx = center.x + r * cos(theta);
+			float ty = center.y + r * sin(theta);
 
-		//final probability for log placement
-		float finalProb = channelProb * shoreProb;
+			// Bounds check
+			if (tx < 5.0 || tx > terrain_size - 15.0 || ty < 5.0 || ty > terrain_size * 0.91) continue;
 
-		if (ofRandom(1.0) < finalProb) {
-			if (isValidPlacement(pos, r)) {
-				DebrisObject log;
-				log.pos = pos;
-				log.type = LOG;
-				log.radius = r;
-				log.color = ofColor::brown;
-				//add anisotropy to log angle
-				log.angle = ofRandom(-20, 20);
-				debrisList.push_back(log);
-			}
-		}
-	}
+			DebrisObject trash;
+			float z = getTerrainHeight(tx, ty) + 1; // Sit on top of terrain
+			trash.pos = ofVec3f(tx, ty, z);
 
-	//phase 3: beach towel/human light object placement
-	//light objects like towels don't get thrown randomly, they get snagged around heavy objects
-	vector<int> rockIndices;
-	for (int i = 0; i < debrisList.size(); i++) {
-		if (debrisList[i].type == ROCK) rockIndices.push_back(i);
-	}
+			// Object Visuals
+			// Since it's "small trash", we keep size variation subtle
+			trash.size = ofVec3f(ofRandom(2, 5), ofRandom(5, 15), ofRandom(1, 3));
 
-	for (int i : rockIndices) {
-		int numTowels = ofRandom(2, 5); //randomly between 2-5 towels per rock
+			// Piles are chaotic, so random rotation is best
+			trash.angle = ofRandom(360);
 
-		for (int t = 0; t < numTowels; t++) {
-			ofVec2f rockPos = debrisList[i].pos;
+			// Color Variation
+			float colRnd = ofRandom(1.0);
+			if (colRnd > 0.6)
+				trash.color = ofColor::gray;
+			else if (colRnd > 0.3)
+				trash.color = ofColor::tan;
+			else
+				trash.color = ofColor::fromHex(0x444444); // Dark wet debris
 
-			//pick spot close to rock
-			float angle = ofRandom(TWO_PI);
-			float dist = ofRandom(10.0, 15.0);
-			ofVec2f offset(cos(angle) * dist, sin(angle) * dist);
-			ofVec2f pos = rockPos + offset;
-
-			float r = 3.0f;
-
-			//verify to check for overlap and add towel
-			if (isValidPlacement(pos, r)) {
-				DebrisObject towel;
-				towel.pos = pos;
-				towel.type = TOWEL;
-				towel.radius = r;
-				towel.color = ofColor::white;
-				towel.angle = ofRandom(360);
-				debrisList.push_back(towel);
-			}
+			debrisList.push_back(trash);
 		}
 	}
 }

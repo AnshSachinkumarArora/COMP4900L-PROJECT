@@ -7,7 +7,8 @@
 enum DebrisType {
 	ROCK,
 	LOG,
-	TOWEL
+	TOWEL,
+	SMALL_DEBRIS
 };
 
 //Struct to hold debris info
@@ -15,6 +16,7 @@ struct DebrisObject {
 	ofVec2f pos;
 	DebrisType type;
 	ofColor color;
+	ofVec3f size;
 	float radius; //collision radius for distribution
 	float angle; //angle for log anisotropy
 };
