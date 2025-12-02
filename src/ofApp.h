@@ -5,20 +5,16 @@
 
 // Define type of debris
 enum DebrisType {
-	ROCK,
-	LOG,
-	TOWEL,
 	SMALL_DEBRIS
 };
 
 //Struct to hold debris info
 struct DebrisObject {
-	ofVec2f pos;
-	DebrisType type;
-	ofColor color;
-	ofVec3f size;
-	float radius; //collision radius for distribution
-	float angle; //angle for log anisotropy
+	ofVec3f pos;
+    ofColor color;
+    ofVec3f size; 
+    float angle;      // Rotation around its own axis (Yaw)
+    ofVec3f slopeNormal; // The angle of the ground beneath it
 };
 
 class ofApp : public ofBaseApp{
@@ -35,11 +31,10 @@ class ofApp : public ofBaseApp{
 		float terrain_size = 800.0f;
 		float shoreline_y = terrain_size * 0.9f; // Shore near higher y
 		float getTerrainHeight(float x, float y);
+		ofVec3f getTerrainNormal(float x, float y);
 
 		//camera
 		ofEasyCam easyCam;
-
-		//DISTRIBUTION LOGIC
 		
 		//list of debris
 		vector<DebrisObject> debrisList;
@@ -47,6 +42,14 @@ class ofApp : public ofBaseApp{
 		//check for point collision
 		bool isValidPlacement(ofVec2f p, float r);
 
-		//placement function
-		void generateDebrisField();
+		// Mode Tracking
+		int currentMode = 3; // Start with the best one (3)
+
+		// The 3 Distribution Algorithms
+		void generateJustPowerLaw(); // Mode 1
+		void generateJustMatern(); // Mode 2
+		void generateMaternPowerLaw(); // Mode 3 (The Hybrid)
+
+		// Helper to run the correct function based on mode
+		void generateDistribution();
 };
